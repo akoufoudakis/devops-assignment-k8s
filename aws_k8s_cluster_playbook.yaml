@@ -1,0 +1,88 @@
+- hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+
+    - name: Install Docker.io and apt-transport-https
+      apt:
+        name:
+        - docker.io
+        - apt-transport-https
+        update_cache: yes
+
+
+    - name: Add the APT signing key
+      ansible.builtin.apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+
+    - name: Add kubernetes-xenial main repository
+      apt_repository:
+        repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+
+    - name: Install k8s packages
+      apt:
+        name:
+        - kubelet
+        - kubeadm
+        - kubernetes-cni
+
+- hosts: aws-k8s-master
+  become: true
+  tasks:
+
+    - name: Run kubeadmin init
+      shell: kubeadm init
+
+    - name: Create $HOME/.kube
+      file:
+        path: $HOME/.kube/
+        state: directory
+
+    - name: Copy admin.conf to $HOME/.kube
+      copy:
+        src: /etc/kubernetes/admin.conf
+        remote_src: yes
+        dest: "$HOME/.kube/config"
+        owner: "{{ ansible_ssh_user }}"
+        group: "{{ ansible_ssh_user }}"
+
+    - name: Set sysctl
+      ansible.posix.sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: '1'
+        state: present
+
+    - name: "Install K8S Weave Net addon"
+      shell: kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')".
+
+    - name: "Allow master to schedule pods"
+      shell: kubectl taint nodes --all node-role.kubernetes.io/master-
+
+    - name: "Register join token"
+      shell: kubeadm token create --print-join-command
+      register: kube_token
+
+    - name: "Add token to host"
+      add_host:
+        name: "kube"
+        token: "{{ kube_token.stdout }}"
+
+- hosts: aws-k8s-workers
+  become: true
+  tasks:
+    - name: Join to the master node
+      shell: "{{hostvars['kube']['token']}}"
+
+- hosts: aws-k8s-master
+  become: true
+  tasks:
+
+    - name: Verify workers joined
+      shell: kubectl get nodes
+      register: "nodes"
+
+    - name: Debug
+      debug:
+        msg: "Clients: {{ nodes.stdout }}"

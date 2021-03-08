@@ -1,0 +1,17 @@
+- hosts: aws-k8s-master
+  become: true
+  tasks:
+
+    - name: Install zip
+      apt:
+        name: zip
+        update_cache: yes
+
+    - name: Download and unzip
+      unarchive:
+        src: https://surfdrive.surf.nl/files/index.php/s/RCxPtHnz1agrY7V/download
+        dest: /home/{{ ansible_ssh_user }}/
+        remote_src: yes
+
+    - name: Deploy Metrics server
+      shell: kubectl create -f /home/{{ ansible_ssh_user }}/kubernetes/
